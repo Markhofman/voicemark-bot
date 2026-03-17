@@ -16,6 +16,16 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 - **API codegen**: Orval (from OpenAPI spec)
 - **Build**: esbuild (CJS bundle)
 
+## Discord TTS Bot
+
+A Discord bot that listens for messages in a specific channel, converts them to speech via ElevenLabs, and replies with the generated MP3.
+
+- Entry: `artifacts/discord-bot/src/index.ts`
+- Run: `pnpm --filter @workspace/discord-bot run dev` (via "Discord Bot" workflow)
+- Required secrets: `DISCORD_BOT_TOKEN`, `ELEVENLABS_API_KEY`
+- Required env vars: `DISCORD_CHANNEL_ID`, `ELEVENLABS_VOICE_ID` (optional, defaults to `JBFqnCBsd6RMkjVDRZzb`)
+- The bot requires the **Message Content Intent** enabled in the Discord Developer Portal
+
 ## Structure
 
 ```text
