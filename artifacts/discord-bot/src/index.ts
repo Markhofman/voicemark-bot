@@ -1,5 +1,18 @@
-import { Client, GatewayIntentBits, AttachmentBuilder, Events } from "discord.js";
+import {
+  Client,
+  GatewayIntentBits,
+  AttachmentBuilder,
+  Events,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  TextChannel,
+} from "discord.js";
 import axios from "axios";
+import { readFileSync, writeFileSync } from "fs";
 
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
@@ -51,6 +64,8 @@ const DEFAULT_PRESET: StylePreset = {
   speed: 1.0,
 };
 
+const PERSISTENT_MSG_FILE = "./persistent_msg_id.txt";
+
 function parseMessage(raw: string): { preset: StylePreset; text: string } {
   const match = raw.match(/^\[(\w+)\]\s*/i);
   if (match) {
@@ -63,6 +78,73 @@ function parseMessage(raw: string): { preset: StylePreset; text: string } {
   return { preset: DEFAULT_PRESET, text: raw };
 }
 
+function buildButtonRow(): ActionRowBuilder<ButtonBuilder> {
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId("preset_film")
+      .setLabel("🎬 Film")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("preset_ad")
+      .setLabel("🎙️ Ad")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("preset_reel")
+      .setLabel("📱 Reel")
+      .setStyle(ButtonStyle.Secondary)
+  );
+}
+
+async function sendPersistentButtons(channel: TextChannel): Promise<void> {
+  // Delete the previous persistent message if we have its ID
+  try {
+    const oldId = readFileSync(PERSISTENT_MSG_FILE, "utf-8").trim();
+    if (oldId) {
+      const oldMsg = await channel.messages.fetch(oldId).catch(() => null);
+      if (oldMsg) await oldMsg.delete().catch(() => {});
+    }
+  } catch {
+    // File doesn't exist yet — first run
+  }
+
+  const msg = await channel.send({
+    content:
+      "**🎤 Text-to-Speech** — Pick a style and enter your text:",
+    components: [buildButtonRow()],
+  });
+
+  writeFileSync(PERSISTENT_MSG_FILE, msg.id);
+  console.log(`📌 Persistent button message sent (ID: ${msg.id})`);
+}
+
+async function generateAudio(
+  text: string,
+  preset: StylePreset
+): Promise<Buffer> {
+  const response = await axios.post<ArrayBuffer>(
+    `https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}`,
+    {
+      text,
+      model_id: "eleven_multilingual_v2",
+      voice_settings: {
+        stability: preset.stability,
+        similarity_boost: preset.similarity_boost,
+        style: preset.style,
+        speed: preset.speed,
+      },
+    },
+    {
+      headers: {
+        "xi-api-key": ELEVENLABS_API_KEY,
+        "Content-Type": "application/json",
+        Accept: "audio/mpeg",
+      },
+      responseType: "arraybuffer",
+    }
+  );
+  return Buffer.from(response.data);
+}
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -71,13 +153,116 @@ const client = new Client({
   ],
 });
 
-client.once(Events.ClientReady, (readyClient) => {
+client.once(Events.ClientReady, async (readyClient) => {
   console.log(`✅ Logged in as ${readyClient.user.tag}`);
-  console.log(`🎙️  Listening for messages in channel: ${DISCORD_CHANNEL_ID}`);
+  console.log(`🎙️  Listening in channel: ${DISCORD_CHANNEL_ID}`);
   console.log(`🔊 Using ElevenLabs voice: ${ELEVENLABS_VOICE_ID}`);
-  console.log(`🎨 Style presets available: [film] [ad] [reel]`);
+
+  try {
+    const channel = await readyClient.channels.fetch(DISCORD_CHANNEL_ID);
+    if (channel instanceof TextChannel) {
+      await sendPersistentButtons(channel);
+    } else {
+      console.warn("⚠️  DISCORD_CHANNEL_ID is not a text channel — buttons not sent.");
+    }
+  } catch (err) {
+    console.error("❌ Failed to send persistent buttons:", err);
+  }
 });
 
+// Button click → show modal
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (interaction.isButton()) {
+    const presetKey = interaction.customId.replace("preset_", "");
+    const preset = PRESETS[presetKey];
+    if (!preset) return;
+
+    const modal = new ModalBuilder()
+      .setCustomId(`modal_${presetKey}`)
+      .setTitle(`${preset.label} — Enter your text`);
+
+    const textInput = new TextInputBuilder()
+      .setCustomId("tts_text")
+      .setLabel("Text to convert to speech")
+      .setStyle(TextInputStyle.Paragraph)
+      .setPlaceholder("Type your text here…")
+      .setMaxLength(2500)
+      .setRequired(true);
+
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(textInput)
+    );
+
+    await interaction.showModal(modal);
+    return;
+  }
+
+  // Modal submit → generate audio and reply
+  if (interaction.isModalSubmit()) {
+    const presetKey = interaction.customId.replace("modal_", "");
+    const preset = PRESETS[presetKey];
+    if (!preset) return;
+
+    const text = interaction.fields.getTextInputValue("tts_text").trim();
+
+    if (!text) {
+      await interaction.reply({ content: "⚠️ No text provided.", ephemeral: true });
+      return;
+    }
+
+    await interaction.deferReply();
+
+    console.log(
+      `📝 [${preset.label}] Converting: "${text.slice(0, 80)}${text.length > 80 ? "…" : ""}"`
+    );
+
+    try {
+      const audioBuffer = await generateAudio(text, preset);
+      const attachment = new AttachmentBuilder(audioBuffer, {
+        name: "speech.mp3",
+        description: `TTS for: ${text.slice(0, 100)}`,
+      });
+
+      await interaction.editReply({
+        content: preset.label,
+        files: [attachment],
+      });
+
+      console.log(
+        `✅ Audio sent (${(audioBuffer.length / 1024).toFixed(1)} KB) — style: ${preset.label}`
+      );
+
+      // Re-send the button panel at the bottom of the channel
+      const channel = interaction.channel;
+      if (channel instanceof TextChannel) {
+        await sendPersistentButtons(channel);
+      }
+    } catch (err) {
+      console.error("❌ ElevenLabs API error:", err);
+
+      let errorMsg =
+        "❌ An unexpected error occurred while generating speech.";
+
+      if (axios.isAxiosError(err)) {
+        const status = err.response?.status;
+        if (status === 401) {
+          errorMsg =
+            "❌ ElevenLabs authentication failed. Please check your API key.";
+        } else if (status === 429) {
+          errorMsg =
+            "⚠️ ElevenLabs rate limit reached. Please try again in a moment.";
+        } else {
+          errorMsg = `❌ Failed to generate speech (API error ${status ?? "unknown"}). Please try again.`;
+        }
+      }
+
+      await interaction.editReply({ content: errorMsg });
+    }
+    return;
+  }
+});
+
+// Keep tag-based text messages working as well
 client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot) return;
   if (message.channelId !== DISCORD_CHANNEL_ID) return;
@@ -86,11 +271,7 @@ client.on(Events.MessageCreate, async (message) => {
   if (!raw) return;
 
   const { preset, text } = parseMessage(raw);
-
-  if (!text) {
-    await message.reply("⚠️ No text found after the tag. Please include a message.");
-    return;
-  }
+  if (!text) return;
 
   if (text.length > 2500) {
     await message.reply(
@@ -106,39 +287,13 @@ client.on(Events.MessageCreate, async (message) => {
   await message.channel.sendTyping();
 
   try {
-    const response = await axios.post<ArrayBuffer>(
-      `https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}`,
-      {
-        text,
-        model_id: "eleven_multilingual_v2",
-        voice_settings: {
-          stability: preset.stability,
-          similarity_boost: preset.similarity_boost,
-          style: preset.style,
-          speed: preset.speed,
-        },
-      },
-      {
-        headers: {
-          "xi-api-key": ELEVENLABS_API_KEY,
-          "Content-Type": "application/json",
-          Accept: "audio/mpeg",
-        },
-        responseType: "arraybuffer",
-      }
-    );
-
-    const audioBuffer = Buffer.from(response.data);
+    const audioBuffer = await generateAudio(text, preset);
     const attachment = new AttachmentBuilder(audioBuffer, {
       name: "speech.mp3",
       description: `TTS for: ${text.slice(0, 100)}`,
     });
 
-    await message.reply({
-      content: preset.label,
-      files: [attachment],
-    });
-
+    await message.reply({ content: preset.label, files: [attachment] });
     console.log(
       `✅ Audio sent (${(audioBuffer.length / 1024).toFixed(1)} KB) — style: ${preset.label}`
     );
