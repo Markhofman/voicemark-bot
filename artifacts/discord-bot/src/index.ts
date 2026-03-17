@@ -35,24 +35,24 @@ interface StylePreset {
 const PRESETS: Record<string, StylePreset> = {
   film: {
     label: "🎬 Film",
-    stability: 0.75,
-    similarity_boost: 0.85,
-    style: 0.8,
-    speed: 0.9,
+    stability: 0.5,
+    similarity_boost: 0.8,
+    style: 0.08,
+    speed: 0.92,
   },
   ad: {
     label: "🎙️ Ad",
-    stability: 0.45,
+    stability: 0.4,
     similarity_boost: 0.8,
-    style: 0.6,
-    speed: 1.05,
+    style: 0.35,
+    speed: 0.97,
   },
   reel: {
     label: "📱 Reel",
-    stability: 0.3,
-    similarity_boost: 0.85,
-    style: 0.9,
-    speed: 1.1,
+    stability: 0.4,
+    similarity_boost: 0.8,
+    style: 0.3,
+    speed: 0.95,
   },
 };
 
@@ -131,6 +131,7 @@ async function generateAudio(
         similarity_boost: preset.similarity_boost,
         style: preset.style,
         speed: preset.speed,
+        use_speaker_boost: true,
       },
     },
     {
