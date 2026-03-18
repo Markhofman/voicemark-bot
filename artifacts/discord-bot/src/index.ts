@@ -14,15 +14,14 @@ import {
 import axios from "axios";
 import { readFileSync, writeFileSync } from "fs";
 
-const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
+const DISCORD_BOT_TOKEN = process.env.DISCORD_TOKEN;
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-const DISCORD_CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
-const ELEVENLABS_VOICE_ID =
-  process.env.ELEVENLABS_VOICE_ID || "JBFqnCBsd6RMkjVDRZzb";
+const DISCORD_CHANNEL_ID = process.env.CHANNEL_ID;
+const ELEVENLABS_VOICE_ID = process.env.VOICE_ID || "JBFqnCBsd6RMkjVDRZzb";
 
-if (!DISCORD_BOT_TOKEN) throw new Error("DISCORD_BOT_TOKEN is required");
+if (!DISCORD_BOT_TOKEN) throw new Error("DISCORD_TOKEN is required");
 if (!ELEVENLABS_API_KEY) throw new Error("ELEVENLABS_API_KEY is required");
-if (!DISCORD_CHANNEL_ID) throw new Error("DISCORD_CHANNEL_ID is required");
+if (!DISCORD_CHANNEL_ID) throw new Error("CHANNEL_ID is required");
 
 interface StylePreset {
   label: string;
