@@ -47,3 +47,6 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Runtime state
+artifacts/discord-bot/persistent_msg_id.txt
